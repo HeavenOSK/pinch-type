@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>pinch-type — Pinch to zoom text, not the page</title>
+<meta name="description" content="A tiny library that intercepts pinch-to-zoom on mobile and scales text instead of zooming the viewport. Canvas-based scroll morph effect.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#050505;--surface:#0a0a0a;--border:#1a1a1a;--text:#e5e5e5;--dim:#777;--accent:#a78bfa}
+html{scroll-behavior:smooth}
+body{font-family:"Inter",system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased}
+
+/* Hero */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:2rem;position:relative}
+.hero h1{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.1;margin-bottom:1rem}
+.hero h1 span{background:linear-gradient(135deg,#a78bfa,#6ee7b7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero p{font-size:1.15rem;color:var(--dim);max-width:480px;margin-bottom:2rem}
+.hero-links{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center}
+.hero-links a{display:inline-flex;align-items:center;gap:.5rem;padding:.65rem 1.4rem;border-radius:8px;font-size:.9rem;font-weight:500;text-decoration:none;transition:all .2s}
+.btn-primary{background:#fff;color:#000}
+.btn-primary:hover{background:#e5e5e5}
+.btn-ghost{border:1px solid var(--border);color:var(--text)}
+.btn-ghost:hover{border-color:#333;background:rgba(255,255,255,.04)}
+.scroll-hint{position:absolute;bottom:2rem;color:var(--dim);font-size:.8rem;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+
+/* Demo */
+.demo-section{padding:4rem 1.5rem;max-width:900px;margin:0 auto}
+.demo-section h2{font-size:1.6rem;font-weight:600;margin-bottom:.5rem;letter-spacing:-0.02em}
+.demo-section .subtitle{color:var(--dim);margin-bottom:2rem;font-size:.95rem}
+#demo-canvas{width:100%;height:70vh;min-height:500px;border-radius:12px;border:1px solid var(--border);overflow:hidden;background:var(--surface)}
+.demo-hint{text-align:center;color:var(--dim);font-size:.8rem;margin-top:1rem}
+
+/* Sections */
+section{padding:5rem 1.5rem;max-width:720px;margin:0 auto}
+section h2{font-size:1.8rem;font-weight:600;letter-spacing:-0.02em;margin-bottom:1.5rem}
+
+/* How it works */
+.features{display:grid;gap:1.5rem;margin-top:1.5rem}
+.feature{padding:1.5rem;border-radius:12px;background:rgba(255,255,255,.02);border:1px solid var(--border)}
+.feature h3{font-size:1rem;font-weight:600;margin-bottom:.4rem}
+.feature p{color:var(--dim);font-size:.9rem;line-height:1.6}
+
+/* Code */
+.code-block{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.25rem 1.5rem;overflow-x:auto;margin:1.5rem 0;font-size:.85rem;line-height:1.7}
+.code-block code{font-family:"JetBrains Mono",monospace;color:#c4b5fd}
+.code-block .comment{color:#555}
+.code-block .str{color:#6ee7b7}
+.code-block .kw{color:#a78bfa}
+.code-block .fn{color:#93c5fd}
+
+/* Install */
+.install-box{display:flex;align-items:center;gap:.75rem;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem 1.5rem;font-family:"JetBrains Mono",monospace;font-size:.95rem;margin:1rem 0}
+.install-box .dollar{color:#555;user-select:none}
+.install-box .cmd{color:#a78bfa}
+
+/* Footer */
+footer{text-align:center;padding:4rem 1.5rem 3rem;color:var(--dim);font-size:.85rem}
+footer a{color:var(--accent);text-decoration:none}
+footer a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<div class="hero">
+  <h1>pinch-<span>type</span></h1>
+  <p>Pinch to zoom text, not the page. Canvas-based text scaling for mobile web, built on <a href="https://github.com/chenglou/pretext" style="color:var(--accent);text-decoration:none">@chenglou/pretext</a>.</p>
+  <div class="hero-links">
+    <a href="https://github.com/lucascrespo23/pinch-type" class="btn-primary">★ GitHub</a>
+    <a href="#demo" class="btn-ghost">See it in action ↓</a>
+  </div>
+  <div class="scroll-hint">Scroll down to try the demo</div>
+</div>
+
+<!-- Live Demo -->
+<div class="demo-section" id="demo">
+  <h2>Live Demo</h2>
+  <p class="subtitle">Scroll to read. On mobile, pinch to scale the text. On desktop, use the scroll wheel.</p>
+  <div id="demo-canvas"></div>
+  <p class="demo-hint">📱 Pinch with two fingers to zoom text &nbsp;·&nbsp; 🖱️ Scroll wheel to navigate</p>
+</div>
+
+<!-- How it works -->
+<section>
+  <h2>How it works</h2>
+  <div class="features">
+    <div class="feature">
+      <h3>Scroll Morph</h3>
+      <p>Lines near the center of the viewport render large and bright. Lines at the edges shrink and fade. The result is a natural reading focus that follows your scroll position.</p>
+    </div>
+    <div class="feature">
+      <h3>Pinch to Zoom</h3>
+      <p>Two-finger pinch gestures on mobile scale the text range in real time — no page zoom, no layout shift. Just bigger or smaller text, instantly.</p>
+    </div>
+    <div class="feature">
+      <h3>Accurate Line Breaking</h3>
+      <p>Text is measured and wrapped using <a href="https://github.com/chenglou/pretext" style="color:var(--accent)">@chenglou/pretext</a> for segment-aware, pixel-perfect line breaking on canvas.</p>
+    </div>
+    <div class="feature">
+      <h3>Momentum Scrolling</h3>
+      <p>Touch scrolling with configurable friction and edge bounce. Feels native. Works everywhere.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Install -->
+<section>
+  <h2>Install</h2>
+  <div class="install-box">
+    <span class="dollar">$</span>
+    <span class="cmd">npm install pinch-type @chenglou/pretext</span>
+  </div>
+
+  <div class="code-block"><code><span class="kw">import</span> { <span class="fn">createPinchType</span> } <span class="kw">from</span> <span class="str">'pinch-type'</span>;
+
+<span class="kw">const</span> pt = <span class="fn">createPinchType</span>(document.<span class="fn">getElementById</span>(<span class="str">'reader'</span>));
+
+pt.<span class="fn">setText</span>(<span class="str">'Your long article text here…'</span>);
+
+<span class="comment">// Pinch-to-zoom works automatically on mobile.</span>
+<span class="comment">// Call pt.destroy() to clean up.</span></code></div>
+</section>
+
+<!-- API -->
+<section>
+  <h2>Options</h2>
+  <div class="code-block"><code><span class="fn">createPinchType</span>(element, {
+  <span class="comment">// Font size at viewport center (default: 26)</span>
+  initialFontSize: <span class="str">26</span>,
+  <span class="comment">// Font size at viewport edges (default: 11)</span>
+  edgeFontSize: <span class="str">11</span>,
+  <span class="comment">// Min/max zoom bounds</span>
+  minFontSize: <span class="str">8</span>,
+  maxFontSize: <span class="str">60</span>,
+  <span class="comment">// Scroll momentum friction (0–1)</span>
+  friction: <span class="str">0.95</span>,
+  <span class="comment">// Morph gradient radius in px</span>
+  morphRadius: <span class="str">300</span>,
+  <span class="comment">// Zoom callback</span>
+  onZoom: (center, edge) => <span class="fn">console.log</span>({ center, edge }),
+});</code></div>
+</section>
+
+<footer>
+  Built by <a href="https://github.com/lucascrespo23">Lucas Crespo</a> · <a href="https://github.com/lucascrespo23/pinch-type">View on GitHub</a> · MIT License
+</footer>
+
+<script src="dist/demo.js"></script>
+</body>
+</html>

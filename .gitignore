@@ -4,3 +4,4 @@ dist/
 examples/basic/bundle.js
 examples/basic/bundle.js.map
 .DS_Store
+demo-site/node_modules/
