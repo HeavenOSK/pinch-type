@@ -71,7 +71,10 @@ function switchMode(mode) {
 function init() {
   // Setup tab listeners
   document.querySelectorAll('.mode-tab').forEach(tab => {
-    tab.addEventListener('click', () => switchMode(tab.dataset.mode));
+    tab.addEventListener('click', () => {
+      switchMode(tab.dataset.mode);
+      if(window.goatcounter) goatcounter.count({path:'mode-'+tab.dataset.mode, event:true});
+    });
   });
 
   // Boot with combined
