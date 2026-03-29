@@ -41,7 +41,7 @@ const DESCRIPTIONS = {
 };
 
 let currentInstance = null;
-let currentMode = 'combined';
+let currentMode = 'pinch';
 
 const creators = {
   pinch: (el) => createPinchType(el, { fontSize: 18 }),
@@ -75,7 +75,7 @@ function init() {
   });
 
   // Boot with combined
-  switchMode('combined');
+  switchMode('pinch');
 }
 
 if (document.readyState === 'loading') {
