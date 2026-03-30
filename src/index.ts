@@ -103,6 +103,34 @@ interface Line {
   weight: number;
 }
 
+interface PinchLine extends Line {
+  lineHeight: number;
+  paragraphIndex: number;
+  start: {
+    segmentIndex: number;
+    graphemeIndex: number;
+  };
+  end: {
+    segmentIndex: number;
+    graphemeIndex: number;
+  };
+}
+
+interface PointerState {
+  y: number;
+  active: boolean;
+}
+
+interface LineAnchor {
+  paragraphIndex: number;
+  start: {
+    segmentIndex: number;
+    graphemeIndex: number;
+  };
+  pointerY: number;
+  yRatio: number;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -115,6 +143,24 @@ function createCanvas(container: HTMLElement) {
   canvas.style.touchAction = 'none';
   container.appendChild(canvas);
   return canvas;
+}
+
+function compareCursor(
+  a: { segmentIndex: number; graphemeIndex: number },
+  b: { segmentIndex: number; graphemeIndex: number },
+) {
+  if (a.segmentIndex !== b.segmentIndex) {
+    return a.segmentIndex - b.segmentIndex;
+  }
+  return a.graphemeIndex - b.graphemeIndex;
+}
+
+function cursorWithinRange(
+  cursor: { segmentIndex: number; graphemeIndex: number },
+  start: { segmentIndex: number; graphemeIndex: number },
+  end: { segmentIndex: number; graphemeIndex: number },
+) {
+  return compareCursor(start, cursor) <= 0 && compareCursor(cursor, end) < 0;
 }
 
 // ─── Pinch Type ──────────────────────────────────────────────────────────────
@@ -140,14 +186,18 @@ export function createPinchType(
 
   const canvas = createCanvas(container);
   const ctx = canvas.getContext('2d')!;
+  const pointer: PointerState = { y: 0, active: false };
+
   let dpr = Math.min(devicePixelRatio || 1, 3);
   let W = 0, H = 0;
   let rawText = '';
-  let lines: Line[] = [];
+  let lines: PinchLine[] = [];
   let totalHeight = 0, maxScroll = 0;
   let scrollY = 0, scrollVelocity = 0;
   let touchLastY = 0, touchLastTime = 0, isTouching = false;
   let pinchActive = false, pinchStartDist = 0, pinchStartSize = 0;
+  let wheelZoomTimer = 0;
+  let zoomAnchor: LineAnchor | null = null;
   let raf = 0, destroyed = false;
 
   function layout() {
@@ -158,14 +208,24 @@ export function createPinchType(
     const paragraphs = rawText.split('\n\n');
     lines = [];
     let curY = padding + 10;
-    for (const para of paragraphs) {
-      const trimmed = para.trim();
+    for (let paragraphIndex = 0; paragraphIndex < paragraphs.length; paragraphIndex++) {
+      const trimmed = paragraphs[paragraphIndex]?.trim();
       if (!trimmed) continue;
       ctx.font = font;
       const prepared = prepareWithSegments(trimmed, font);
       const result = layoutWithLines(prepared, maxW, lh);
       for (let li = 0; li < result.lines.length; li++) {
-        lines.push({ text: result.lines[li].text, y: curY + li * lh, baseSize: fontSize, weight: 400 });
+        const line = result.lines[li]!;
+        lines.push({
+          text: line.text,
+          y: curY + li * lh,
+          baseSize: fontSize,
+          weight: 400,
+          lineHeight: lh,
+          paragraphIndex,
+          start: { ...line.start },
+          end: { ...line.end },
+        });
       }
       curY += result.lines.length * lh + lh * 0.6;
     }
@@ -183,7 +243,7 @@ export function createPinchType(
     ctx.font = `400 ${fontSize * d}px ${fontFamily}`;
     for (const line of lines) {
       const screenY = line.y - scrollY;
-      if (screenY < -100 || screenY > H + 100) continue;
+      if (screenY < -line.lineHeight || screenY > H + line.lineHeight) continue;
       ctx.fillText(line.text, padding * d, screenY * d);
     }
   }
@@ -207,10 +267,78 @@ export function createPinchType(
     return Math.hypot(dx, dy);
   }
 
+  function resetZoomAnchor() {
+    if (wheelZoomTimer !== 0) {
+      clearTimeout(wheelZoomTimer);
+      wheelZoomTimer = 0;
+    }
+    zoomAnchor = null;
+  }
+
+  function getLineAtViewportY(viewportY: number) {
+    for (const line of lines) {
+      const screenY = line.y - scrollY;
+      if (viewportY >= screenY && viewportY <= screenY + line.lineHeight) {
+        return line;
+      }
+    }
+    return null;
+  }
+
+  function createLockedAnchor(viewportY: number) {
+    const line = getLineAtViewportY(viewportY);
+    if (!line) return null;
+    const screenY = line.y - scrollY;
+    return {
+      paragraphIndex: line.paragraphIndex,
+      start: { ...line.start },
+      pointerY: viewportY,
+      yRatio: line.lineHeight > 0 ? clamp((viewportY - screenY) / line.lineHeight, 0, 1) : 0,
+    };
+  }
+
+  function createPointerLockedAnchor() {
+    if (!pointer.active) return null;
+    return createLockedAnchor(pointer.y);
+  }
+
+  function findLineForAnchor(anchor: LineAnchor) {
+    return lines.find((line) => (
+      line.paragraphIndex === anchor.paragraphIndex &&
+      cursorWithinRange(anchor.start, line.start, line.end)
+    )) ?? null;
+  }
+
+  function applyLockedAnchor(anchor: LineAnchor, viewportY = anchor.pointerY) {
+    const line = findLineForAnchor(anchor);
+    if (!line) return;
+    const anchorContentY = line.y + anchor.yRatio * line.lineHeight;
+    scrollY = clamp(anchorContentY - viewportY, 0, maxScroll);
+  }
+
+  function getTouchMidpointY(e: TouchEvent) {
+    const rect = canvas.getBoundingClientRect();
+    return ((e.touches[0].clientY + e.touches[1].clientY) / 2) - rect.top;
+  }
+
+  function onPointerMove(e: PointerEvent) {
+    if (e.pointerType === 'touch') return;
+    const rect = canvas.getBoundingClientRect();
+    pointer.y = e.clientY - rect.top;
+    pointer.active = true;
+  }
+
+  function onPointerLeave(e: PointerEvent) {
+    if (e.pointerType === 'touch') return;
+    pointer.active = false;
+  }
+
   function onTouchStart(e: TouchEvent) {
     if (e.touches.length === 2) {
       pinchActive = true; pinchStartDist = pinchDist(e); pinchStartSize = fontSize;
       scrollVelocity = 0; isTouching = false;
+      resetZoomAnchor();
+      zoomAnchor = createLockedAnchor(getTouchMidpointY(e));
     } else if (e.touches.length === 1 && !pinchActive) {
       isTouching = true; scrollVelocity = 0;
       touchLastY = e.touches[0].clientY; touchLastTime = performance.now();
@@ -222,7 +350,11 @@ export function createPinchType(
     if (pinchActive && e.touches.length === 2) {
       const scale = pinchDist(e) / pinchStartDist;
       const newSize = clamp(Math.round(pinchStartSize * scale), minFont, maxFont);
-      if (newSize !== fontSize) { fontSize = newSize; layout(); onZoom?.(fontSize); }
+      const midpointY = getTouchMidpointY(e);
+      const sizeChanged = newSize !== fontSize;
+      if (sizeChanged) { fontSize = newSize; layout(); }
+      if (zoomAnchor) applyLockedAnchor(zoomAnchor, midpointY);
+      if (sizeChanged) onZoom?.(fontSize);
       e.preventDefault(); return;
     }
     if (!isTouching || e.touches.length !== 1) return;
@@ -236,17 +368,27 @@ export function createPinchType(
   }
 
   function onTouchEnd(e: TouchEvent) {
-    if (e.touches.length < 2) pinchActive = false;
+    if (e.touches.length < 2) { pinchActive = false; resetZoomAnchor(); }
     if (e.touches.length === 0) isTouching = false;
   }
 
   function onWheel(e: WheelEvent) {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
-      // Trackpad pinch-to-zoom
+      if (wheelZoomTimer === 0) zoomAnchor = createPointerLockedAnchor();
+      clearTimeout(wheelZoomTimer);
+      wheelZoomTimer = window.setTimeout(() => {
+        wheelZoomTimer = 0;
+        zoomAnchor = null;
+      }, 140);
+
       const delta = e.deltaY > 0 ? -1 : 1;
       const newSize = clamp(fontSize + delta, minFont, maxFont);
-      if (newSize !== fontSize) { fontSize = newSize; layout(); onZoom?.(fontSize); }
+      if (newSize !== fontSize) {
+        fontSize = newSize; layout();
+        if (zoomAnchor) applyLockedAnchor(zoomAnchor);
+        onZoom?.(fontSize);
+      }
     } else {
       scrollY += e.deltaY; scrollY = clamp(scrollY, -50, maxScroll + 50);
     }
@@ -258,8 +400,12 @@ export function createPinchType(
     canvas.width = W * dpr; canvas.height = H * dpr;
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
     layout();
+    if (zoomAnchor) applyLockedAnchor(zoomAnchor);
   }
 
+  canvas.addEventListener('pointerenter', onPointerMove);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerleave', onPointerLeave);
   canvas.addEventListener('touchstart', onTouchStart, { passive: false });
   canvas.addEventListener('touchmove', onTouchMove, { passive: false });
   canvas.addEventListener('touchend', onTouchEnd);
@@ -269,10 +415,14 @@ export function createPinchType(
   raf = requestAnimationFrame(loop);
 
   return {
-    setText(text: string) { rawText = text; scrollY = 0; scrollVelocity = 0; layout(); },
+    setText(text: string) { rawText = text; scrollY = 0; scrollVelocity = 0; resetZoomAnchor(); layout(); },
     resize: handleResize,
     destroy() {
       destroyed = true; cancelAnimationFrame(raf);
+      resetZoomAnchor();
+      canvas.removeEventListener('pointerenter', onPointerMove);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('touchstart', onTouchStart);
       canvas.removeEventListener('touchmove', onTouchMove);
       canvas.removeEventListener('touchend', onTouchEnd);
